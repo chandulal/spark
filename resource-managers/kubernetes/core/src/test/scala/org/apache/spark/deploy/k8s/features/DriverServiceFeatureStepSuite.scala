@@ -26,6 +26,9 @@ import org.apache.spark.{SparkConf, SparkFunSuite}
 import org.apache.spark.deploy.k8s.{KubernetesConf, KubernetesDriverSpecificConf, SparkPod}
 import org.apache.spark.deploy.k8s.Config._
 import org.apache.spark.deploy.k8s.Constants._
+import org.apache.spark.deploy.k8s.submit.JavaMainAppResource
+import org.apache.spark.internal.config._
+import org.apache.spark.ui.SparkUI
 import org.apache.spark.util.Clock
 
 class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
@@ -51,10 +54,11 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
     sparkConf = new SparkConf(false)
   }
 
-  test("Headless service has a port for the driver RPC and the block manager.") {
+  test("Headless service has a port for the driver RPC, the block manager and driver ui.") {
     sparkConf = sparkConf
       .set("spark.driver.port", "9000")
       .set(org.apache.spark.internal.config.DRIVER_BLOCK_MANAGER_PORT, 8080)
+      .set(UI_PORT_NAME, "4040")
     val configurationStep = new DriverServiceFeatureStep(
       KubernetesConf(
         sparkConf,
@@ -79,6 +83,7 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
     verifyService(
       9000,
       8080,
+      4040,
       s"$SHORT_RESOURCE_NAME_PREFIX${DriverServiceFeatureStep.DRIVER_SVC_POSTFIX}",
       driverService)
   }
@@ -130,6 +135,7 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
     verifyService(
       DEFAULT_DRIVER_PORT,
       DEFAULT_BLOCKMANAGER_PORT,
+      4040,
       s"$SHORT_RESOURCE_NAME_PREFIX${DriverServiceFeatureStep.DRIVER_SVC_POSTFIX}",
       resolvedService)
     val additionalProps = configurationStep.getAdditionalPodSystemProperties()
@@ -222,12 +228,13 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
   private def verifyService(
       driverPort: Int,
       blockManagerPort: Int,
+      drierUIPort: Int,
       expectedServiceName: String,
       service: Service): Unit = {
     assert(service.getMetadata.getName === expectedServiceName)
     assert(service.getSpec.getClusterIP === "None")
     assert(service.getSpec.getSelector.asScala === DRIVER_LABELS)
-    assert(service.getSpec.getPorts.size() === 2)
+    assert(service.getSpec.getPorts.size() === 3)
     val driverServicePorts = service.getSpec.getPorts.asScala
     assert(driverServicePorts.head.getName === DRIVER_PORT_NAME)
     assert(driverServicePorts.head.getPort.intValue() === driverPort)
@@ -235,6 +242,9 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
     assert(driverServicePorts(1).getName === BLOCK_MANAGER_PORT_NAME)
     assert(driverServicePorts(1).getPort.intValue() === blockManagerPort)
     assert(driverServicePorts(1).getTargetPort.getIntVal === blockManagerPort)
+    assert(driverServicePorts(2).getName === UI_PORT_NAME)
+    assert(driverServicePorts(2).getPort.intValue() === drierUIPort)
+    assert(driverServicePorts(2).getTargetPort.getIntVal === drierUIPort)
   }
 
   private def verifySparkConfHostNames(
